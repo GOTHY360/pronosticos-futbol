@@ -13,7 +13,7 @@ import statistics
 import sys
 from datetime import date, datetime, time, timedelta, timezone
 
-from . import export
+from . import advisor, export, notify
 from ..calidad import combo, danger, review
 from ..calidad.backtest import competition_check, market_check
 from ..calidad.calibration import Calibrator
@@ -374,6 +374,10 @@ def main(argv):
     args = [a for a in argv if not a.startswith("--")]
     target = date.fromisoformat(args[0]) if args else (datetime.now(TZ).date() + timedelta(days=1))
     result = nightly(con, target)
+    adv = advisor.evaluate(con)
+    advisor.notify_if_new(con, adv, notify.send)
+    if adv.get("new"):
+        log(adv["message"])
     export.export_all(con, result)
     log("Listo.")
 

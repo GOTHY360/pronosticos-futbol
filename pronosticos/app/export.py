@@ -6,6 +6,7 @@ import math
 from collections import defaultdict
 from datetime import datetime, timezone
 
+from . import advisor
 from ..calidad.backtest import simulate_combos, simulate_selection
 from ..calidad.calibration import holdout, metrics, reliability
 from ..config import COMPETITIONS, MODEL_PARAMS_PATH, MODEL_VERSION, SELECTION, SITE_DATA_DIR
@@ -140,6 +141,8 @@ def export_all(con, result: dict | None):
     out["calibration"] = [{"lo": b, "hi": b + 0.05, "n": k, "mean_p": sp / k, "freq": w / k}
                           for b, (k, sp, w) in sorted(cal.items())]
     out["models_live"] = _model_live(con)
+    adv = advisor.evaluate(con, record=False)
+    out["advisor"] = {k: adv[k] for k in ("level", "reached", "progress", "message")}
     combos = [{**dict(r), "legs": json.loads(r["legs"])} for r in con.execute("SELECT * FROM combos ORDER BY target_date DESC")]
     done = [c for c in combos if c["status"] in ("won", "lost")]
     out["combos"] = {"n": len(done), "won": sum(c["status"] == "won" for c in done),

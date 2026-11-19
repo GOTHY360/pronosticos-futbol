@@ -275,6 +275,13 @@ function renderPerformance(h){
     <div class="card kpi"><div class="v">${o.roi_flat==null?'—':(o.roi_flat*100).toFixed(1)+'%'}</div><div class="l">Rentabilidad simulada (stake fijo, cuota real, n=${o.n_with_odds})</div></div>
     <div class="card kpi"><div class="v">${o.pending}</div><div class="l">Pendientes · ${o.withdrawn} retirados · ${o.void} nulos</div></div>
   </div>`;
+  const ad = h.advisor;
+  if (ad) {
+    const pg = ad.progress || {};
+    html += ad.level
+      ? `<div class="note ${ad.level==='invertir'?'':'warn'}" style="white-space:pre-line"><b>Asesor de inversión</b>\n${esc(ad.message)}</div>`
+      : `<div class="note"><b>Asesor de inversión:</b> todavía no conviene pagar APIs. Progreso hacia la prueba: ${esc(pg.liquidados||'0 / 100')} pronósticos liquidados${pg.efectividad?' · '+esc(pg.efectividad):''} · racha actual ${pg.racha_actual??0} (mejor ${pg.mejor_racha??0}). Te avisaré por Telegram cuando haya una racha prometedora y cuando el rendimiento esté demostrado.</div>`;
+  }
   if (o.n < 100) html += `<div class="note warn">Con menos de 100 pronósticos liquidados las cifras dependen mucho del azar. Se registran todos, incluidos los fallados y los retirados.</div>`;
   html += `<h2>Evolución: efectividad real vs. anunciada</h2><div class="card">${lineChart(h.series,['hit','expected'],['var(--accent)','var(--exp)'],v=>pct(v))}
     <div class="legend"><span><i style="background:var(--accent)"></i>Real acumulada</span><span><i style="background:var(--exp)"></i>Anunciada (prob. media)</span></div></div>`;

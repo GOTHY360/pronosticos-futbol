@@ -58,16 +58,37 @@ def adjustment(profile: dict, missing: list[str]) -> dict:
             "attack_share_missing": share, "n_def": n_def, "gk": gk}
 
 
-def preliminary_adjustments(con, h: str, a: str, before: str) -> tuple[dict, dict]:
-    """Ajustes de la noche anterior: sólo suspensiones probables. Devuelve (adj, info)."""
+def preliminary_adjustments(con, h: str, a: str, before: str, injuries: dict | None = None) -> tuple[dict, dict]:
+    """Ajustes de la noche anterior: suspensiones probables (roja en el último partido) y, si hay
+    API-Football, lesionados y sancionados confirmados. injuries: {team_id: [{"player","kind","reason"}]}.
+    Devuelve (adj, info)."""
+    from ..datos.apifootball import player_match
     adj, info = {}, {}
     for t in (h, a):
         prof = team_profile(con, t, before)
-        sus = prof.get("likely_suspended", [])
-        info[t] = {"profile_n": prof["n"], "suspended": [prof["players"][s]["name"] for s in sus]}
-        if sus:
-            a_ = adjustment(prof, sus)
+        sus = list(prof.get("likely_suspended", []))
+        out_ids, doubt, unmatched = [], [], []
+        cands = {pid: p["name"] for pid, p in prof["players"].items()}
+        for inj in (injuries or {}).get(t, []):
+            pid = player_match(inj["player"], cands)
+            if not pid:
+                unmatched.append(inj["player"])
+                continue
+            if (inj.get("kind") or "").lower().startswith("missing"):
+                out_ids.append(pid)
+            else:
+                doubt.append(pid)
+        missing = sorted(set(sus) | {p for p in out_ids if p in prof["regulars"]})
+        info[t] = {"profile_n": prof["n"], "suspended": [prof["players"][s]["name"] for s in sus],
+                   "injured_regulars": [prof["players"][p]["name"] for p in out_ids if p in prof["regulars"]],
+                   "injured_others": [prof["players"][p]["name"] for p in out_ids if p not in prof["regulars"]],
+                   "doubtful_regulars": [prof["players"][p]["name"] for p in doubt if p in prof["regulars"]],
+                   "injuries_source": bool(injuries), "unmatched": unmatched}
+        if missing:
+            a_ = adjustment(prof, missing)
             adj[t] = {"att": a_["att"], "def": a_["def"]}
+            info[t]["n_out_regulars"] = len(missing)
+            info[t]["attack_share_missing"] = round(a_["attack_share_missing"], 3)
     return adj, info
 
 

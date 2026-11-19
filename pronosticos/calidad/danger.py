@@ -121,6 +121,16 @@ def detect(con, fx: dict, ctx: dict) -> list[dict]:
     for t, info in (ctx.get("availability") or {}).items():
         if info.get("suspended"):
             add("suspension", "advertencia", f"Probable suspensión (roja en el último partido): {', '.join(info['suspended'])}.")
+        inj = info.get("injured_regulars") or []
+        if inj:
+            # API-Football: titulares habituales lesionados o sancionados (bajas confirmadas)
+            who = ", ".join(inj[:5])
+            if len(inj) >= 4:
+                add("lesiones", "bloqueo", f"{len(inj)} titulares habituales lesionados o sancionados: {who}.")
+            elif len(inj) >= 2:
+                add("lesiones", "advertencia", f"Bajas confirmadas de titulares: {who} (ya descontadas en el modelo).")
+        if len(info.get("doubtful_regulars") or []) >= 3:
+            add("dudas", "advertencia", f"Varios titulares en duda: {', '.join(info['doubtful_regulars'][:5])}.")
         if info.get("confirmed"):
             nm = info.get("n_missing", 0)
             who = ", ".join(info.get("missing", [])[:5])

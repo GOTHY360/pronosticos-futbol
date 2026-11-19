@@ -19,7 +19,7 @@ from ..calidad.backtest import competition_check, market_check
 from ..calidad.calibration import Calibrator
 from ..calidad.quality import choose, evaluate_match, reasons
 from ..config import COMPETITIONS, MODEL, MODEL_VERSION, TZ
-from ..datos import espn
+from ..datos import apifootball, espn
 from ..datos.ingest import event_context, sync_calendar, sync_details, sync_news, upsert_events
 from ..db import connect
 from ..motor.availability import lineup_adjustments, preliminary_adjustments
@@ -158,13 +158,15 @@ class Analyzer:
         h, a = fx["home_id"], fx["away_id"]
         if not eng.knows(h, a):
             return None, [], ["Equipo sin historial en la base de datos (recién ascendido o datos faltantes)."]
+        af = apifootball.event_info(self.con, fx["event_id"], fx["home_name"], fx["away_name"])
+        injuries = {h: af.get("home", []), a: af.get("away", [])} if af.get("available") else None
         if phase == "actualizado" and lineups:
             adj, avail = lineup_adjustments(self.con, h, a, fx["date_utc"], lineups)
         else:
-            adj, avail = preliminary_adjustments(self.con, h, a, fx["date_utc"])
+            adj, avail = preliminary_adjustments(self.con, h, a, fx["date_utc"], injuries)
         neutral = bool(fx.get("neutral"))
         pred = eng.predict(h, a, fx["home_name"], fx["away_name"], neutral, adj)
-        ctx = {**fx, **pred, "phase": phase, "neutral": neutral, "adj": adj, "availability": avail,
+        ctx = {**fx, **pred, "phase": phase, "neutral": neutral, "adj": adj, "availability": avail, "af": af,
                "odds": latest_odds(self.con, fx["event_id"]), "odds_move": danger.odds_movement(self.con, fx["event_id"]),
                "form_home": eng.form(h), "form_away": eng.form(a),
                "home_at_home": eng.form(h, 10, "home"), "away_away": eng.form(a, 10, "away"),
@@ -234,6 +236,10 @@ def nightly(con, target: date) -> dict:
         (_iso(start), _iso(start + timedelta(days=1)))).fetchall()]
     log(f"Partidos programados para {target}: {len(fixtures)}")
     sync_news(con, sorted({f["league"] for f in fixtures}), log=log)
+    af = apifootball.sync_day(con, target.isoformat(), log=log)
+    if af.get("enabled"):
+        log(f"API-Football: {af.get('fixtures', 0)} partidos ({af.get('matched', 0)} emparejados), "
+            f"{af.get('injuries', 0)} bajas registradas")
     an = Analyzer(con)
     candidates, combo_pool, analyzed, contexts = [], [], [], {}
     for fx in fixtures:
@@ -287,6 +293,9 @@ def update_upcoming(con, hours_ahead: float = 3.0):
         log("Sin pronósticos pendientes.")
         return
     refresh_today_odds(con, sorted({p["league"] for p in pend}))
+    today = datetime.now(TZ).date().isoformat()
+    if any(p["target_date"] == today for p in pend) and apifootball.api_key():
+        apifootball.sync_day(con, today, with_fixtures=False, log=log)   # bajas de última hora (2 consultas)
     an = None
     for p in pend:
         ko = datetime.fromisoformat(p["kickoff_utc"].replace("Z", "+00:00"))

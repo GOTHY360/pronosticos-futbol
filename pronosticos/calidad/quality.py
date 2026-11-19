@@ -265,6 +265,14 @@ def reasons(ctx: dict, c: dict) -> list[str]:
                  f"{b['freq']:.0%} de las veces (n={b['n']}).")
     if ctx.get("h2h"):
         r.append("Últimos enfrentamientos: " + " · ".join(ctx["h2h"][:3]))
+    af = ctx.get("af") or {}
+    if af.get("available"):
+        if af.get("referee"):
+            r.append(f"Árbitro: {af['referee']}.")
+        for side, team in (("home", ctx["home_name"]), ("away", ctx["away_name"])):
+            bajas = [f"{i['player']} ({'baja' if (i.get('kind') or '').lower().startswith('missing') else 'duda'}"
+                     f"{': ' + i['reason'] if i.get('reason') else ''})" for i in af.get(side, [])]
+            r.append(f"Bajas {team} (API-Football): " + (", ".join(bajas[:6]) if bajas else "ninguna reportada") + ".")
     for f in ctx["flags"]:
         r.append(f"⚠ {f['message']}")
     return r

@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     environment: {name: github-pages}
+    env:
+      APIFOOTBALL_KEY: ${{ secrets.APIFOOTBALL_KEY }}   # opcional: lesiones, sanciones y árbitro
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

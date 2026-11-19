@@ -1,0 +1,108 @@
+# AI Football Predictor en la nube (GitHub Actions, gratis). Funciona con el PC apagado.
+#  - 19:15 COL: análisis nocturno de mañana (margen por los retrasos habituales de GitHub)
+#  - ~20:47–21:00 COL: entrega por Telegram + tablero publicado en GitHub Pages
+#  - Cada hora 08:00–22:00 COL: alineaciones y cambios de última hora
+# La base de datos (≈165 MB) se guarda en la caché de Actions, no en el repositorio.
+# Primera ejecución: si no hay caché, descarga el historial completo (~1,5 h) y valida los modelos.
+name: pronosticos
+on:
+  schedule:
+    - cron: "15 0 * * *"        # 19:15 COL → análisis nocturno
+    - cron: "47 1 * * *"        # 20:47 COL → entrega (GitHub puede retrasarlo unos minutos)
+    - cron: "23 13-23 * * *"    # 08:23–18:23 COL → alineaciones
+    - cron: "23 0-3 * * *"      # 19:23–22:23 COL → alineaciones
+  workflow_dispatch:
+    inputs:
+      mode: {description: "nightly | deliver | update", default: "nightly"}
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency: {group: pronosticos, cancel-in-progress: false}
+env:
+  PYTHONIOENCODING: utf-8
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    environment: {name: github-pages}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install numpy
+      - name: Modo
+        id: mode
+        run: |
+          M="${{ github.event.inputs.mode }}"
+          case "${{ github.event.schedule }}" in
+            "15 0 * * *") M=nightly ;;
+            "47 1 * * *") M=deliver ;;
+            "23 13-23 * * *"|"23 0-3 * * *") M=update ;;
+          esac
+          echo "mode=${M:-nightly}" >> "$GITHUB_OUTPUT"
+      - name: Restaurar base de datos
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            pronosticos/data/pronosticos.sqlite
+            pronosticos/data/model_params.json
+            pronosticos/data/revision
+            pronosticos/web/data
+          key: db-${{ github.run_id }}
+          restore-keys: db-
+      - name: Primera carga del historial (sólo si no hay base de datos)
+        if: steps.cache.outputs.cache-matched-key == ''
+        run: |
+          python -m pronosticos.backfill
+          python -m pronosticos.tuning
+          python -m pronosticos.backtest
+      - name: Análisis nocturno
+        if: steps.mode.outputs.mode == 'nightly'
+        run: |
+          python -m pronosticos.run_daily
+          python -m pronosticos.run_daily --review
+          if [ "$(TZ=America/Bogota date +%u)" = "7" ]; then
+            python -m pronosticos.tuning; python -m pronosticos.backtest; python -m pronosticos.run_daily --settle
+          fi
+      - name: Alineaciones y última hora
+        if: steps.mode.outputs.mode == 'update'
+        run: python -m pronosticos.run_daily --update
+      - name: Entrega por Telegram (21:00)
+        if: steps.mode.outputs.mode == 'deliver'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          python -m pronosticos.run_daily --review
+          python -m pronosticos.app.notify
+      - name: Compactar base de datos
+        if: steps.mode.outputs.mode != 'deliver'
+        run: python -c "import sqlite3; c=sqlite3.connect('pronosticos/data/pronosticos.sqlite'); c.execute('PRAGMA wal_checkpoint(TRUNCATE)'); c.execute('VACUUM'); c.close()"
+      - name: Guardar base de datos
+        if: always() && steps.mode.outputs.mode != 'deliver'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            pronosticos/data/pronosticos.sqlite
+            pronosticos/data/model_params.json
+            pronosticos/data/revision
+            pronosticos/web/data
+          key: db-${{ github.run_id }}
+      - name: Copia de seguridad semanal
+        if: steps.mode.outputs.mode == 'nightly'
+        uses: actions/upload-artifact@v4
+        with:
+          name: respaldo-db
+          path: pronosticos/data/pronosticos.sqlite
+          retention-days: 14
+          overwrite: true
+      # Tablero web: gratis con repositorio público. Con repositorio privado sin plan pago este paso
+      # se omite y la entrega llega sólo por Telegram.
+      - uses: actions/upload-pages-artifact@v3
+        continue-on-error: true
+        with: {path: pronosticos/web}
+      - uses: actions/deploy-pages@v4
+        continue-on-error: true

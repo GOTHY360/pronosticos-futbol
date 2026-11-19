@@ -1,0 +1,8 @@
+pronosticos/data/
+pronosticos/web/data/
+__pycache__/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.claude/
+auditoria/

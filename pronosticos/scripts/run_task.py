@@ -17,11 +17,14 @@ URL = "http://localhost:8765"
 
 
 def run_module(mod, *args):
+    """Cada módulo se aísla: un fallo en fútbol no impide la NBA (y viceversa)."""
     sys.argv = [mod, *args]
     try:
         runpy.run_module(mod, run_name="__main__", alter_sys=True)
     except SystemExit:
         pass
+    except Exception:
+        traceback.print_exc()
 
 
 def main():
@@ -38,13 +41,17 @@ def main():
     try:
         if mode == "nightly":
             run_module("pronosticos.app.run_daily")
+            run_module("nba.run_daily")
             if datetime.date.today().weekday() == 6:          # domingo: reajuste semanal
                 run_module("pronosticos.calidad.tuning")
                 run_module("pronosticos.calidad.backtest")
+                run_module("nba.backtest")
         elif mode == "update":
             run_module("pronosticos.app.run_daily", "--update")
+            run_module("nba.run_daily", "--update")
         elif mode == "review":
             run_module("pronosticos.app.run_daily", "--review")
+            run_module("nba.run_daily", "--review")
     except Exception:
         traceback.print_exc()
     finally:

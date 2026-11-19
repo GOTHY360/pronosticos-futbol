@@ -52,6 +52,9 @@ jobs:
             pronosticos/data/model_params.json
             pronosticos/data/revision
             pronosticos/web/data
+            nba/data/nba.sqlite
+            nba/data/revision
+            pronosticos/web/nba/data
           key: db-${{ github.run_id }}
           restore-keys: db-
       - name: Primera carga del historial (sólo si no hay base de datos)
@@ -60,17 +63,25 @@ jobs:
           python -m pronosticos.backfill
           python -m pronosticos.tuning
           python -m pronosticos.backtest
+      - name: Primera carga NBA (sólo si no hay base de datos NBA)
+        if: steps.mode.outputs.mode != 'deliver'
+        run: |
+          if [ ! -f nba/data/nba.sqlite ]; then python -m nba.backfill && python -m nba.backtest; fi
       - name: Análisis nocturno
         if: steps.mode.outputs.mode == 'nightly'
         run: |
+          python -m nba.run_daily || echo "NBA: error (fútbol continúa)"
           python -m pronosticos.run_daily
           python -m pronosticos.run_daily --review
           if [ "$(TZ=America/Bogota date +%u)" = "7" ]; then
             python -m pronosticos.tuning; python -m pronosticos.backtest; python -m pronosticos.run_daily --settle
+            python -m nba.backtest
           fi
       - name: Alineaciones y última hora
         if: steps.mode.outputs.mode == 'update'
-        run: python -m pronosticos.run_daily --update
+        run: |
+          python -m pronosticos.run_daily --update
+          python -m nba.run_daily --update || true
       - name: Entrega por Telegram (21:00)
         if: steps.mode.outputs.mode == 'deliver'
         env:
@@ -80,9 +91,10 @@ jobs:
         run: |
           python -m pronosticos.run_daily --review
           python -m pronosticos.app.notify
+          python -m nba.notify || true
       - name: Compactar base de datos
         if: steps.mode.outputs.mode != 'deliver'
-        run: python -c "import sqlite3; c=sqlite3.connect('pronosticos/data/pronosticos.sqlite'); c.execute('PRAGMA wal_checkpoint(TRUNCATE)'); c.execute('VACUUM'); c.close()"
+        run: python -c "import sqlite3; [ (lambda c: (c.execute('PRAGMA wal_checkpoint(TRUNCATE)'), c.execute('VACUUM'), c.close()))(sqlite3.connect(f)) for f in ('pronosticos/data/pronosticos.sqlite','nba/data/nba.sqlite') ]"
       - name: Guardar base de datos
         if: always() && steps.mode.outputs.mode != 'deliver'
         uses: actions/cache/save@v4
@@ -92,6 +104,9 @@ jobs:
             pronosticos/data/model_params.json
             pronosticos/data/revision
             pronosticos/web/data
+            nba/data/nba.sqlite
+            nba/data/revision
+            pronosticos/web/nba/data
           key: db-${{ github.run_id }}
       - name: Copia de seguridad semanal
         if: steps.mode.outputs.mode == 'nightly'

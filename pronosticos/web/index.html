@@ -82,7 +82,7 @@ svg text{fill:var(--muted);font-size:11px}
 <header>
   <div class="wrap">
     <div class="top">
-      <div><h1>AI Football Predictor</h1><div class="sub" id="subtitle">Cargando…</div></div>
+      <div><h1>AI Football Predictor <a href="nba/" style="font-size:13px;font-weight:600;color:var(--accent);margin-left:8px;text-decoration:none">🏀 NBA →</a></h1><div class="sub" id="subtitle">Cargando…</div></div>
       <button class="theme" id="themeBtn" aria-label="Cambiar tema">◐</button>
     </div>
     <nav role="tablist">
@@ -161,6 +161,7 @@ function pickCard(p){
     ${p.result_detail ? `<div class="meta" style="margin-top:8px">${esc(p.result_detail)}</div>` : ''}
     ${p.review_notes ? `<div class="meta" style="margin-top:4px">Analista: ${esc(p.review_notes)}</div>` : ''}
     <details><summary>Filtro de calidad</summary><ul class="checks">${(p.quality_checks||[]).map(c=>{const k=CHK[c.status]||['?',''];return `<li><b class="chip ${k[1]}">${k[0]}</b><span><b>${esc(c.name)}</b> · ${esc(c.detail)}</span></li>`}).join('')}</ul></details>
+    ${(p.neighbors||[]).length > 1 ? `<div class="meta" style="margin-top:6px">Otras líneas: ${p.neighbors.map(n=>`${n.line} (${pct(n.prob)})`).join(' · ')} — si tu casa ofrece otra línea, usa su probabilidad y su cuota mínima = 1.02 / prob.</div>` : ''}
     <details><summary>Por qué este pronóstico</summary><ul>${(p.reasons||[]).map(r=>`<li>${esc(r)}</li>`).join('')}</ul></details>
   </article>`;
 }
@@ -229,6 +230,7 @@ function renderToday(latest, model){
     return `<div class="item"><div class="match" style="font-size:14px">${esc(a.home)} vs ${esc(a.away)}${a.neutral?' <span class="chip">sede neutral</span>':''}</div>
       <div class="meta">${esc(a.league_name)} · ${fmtKick(a.kickoff_utc)} · <b>${esc(a.status)}</b>${a.xg ? ` · goles esperados ${a.xg[0]}–${a.xg[1]}` : ''}</div>
       ${pr['1X2:H'] != null ? `<div class="meta">1X2 ${pct(pr['1X2:H'])} / ${pct(pr['1X2:D'])} / ${pct(pr['1X2:A'])} · Más de 2.5 ${pct(pr['OU_GOALS:over'])} · Ambos marcan ${pct(pr['BTTS:yes'])}</div>` : ''}
+      ${a.summary ? `<div class="meta">${esc(a.summary)}</div>` : ''}
       ${sc ? `<div class="meta">Monte Carlo (10.000 partidos): ${sc.top_scores.slice(0,4).map(t=>esc(t.score)+' '+pct(t.p)).join(' · ')}</div>` : ''}
       ${(a.notes||[]).map(n=>`<div class="meta">⚠ ${esc(n)}</div>`).join('')}</div>`;
   }).join('');

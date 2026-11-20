@@ -45,6 +45,12 @@ def _now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def target_date() -> date:
+    """La entrega es a medianoche: si se ejecuta entre las 00:00 y las 06:00 (Colombia), los partidos son los de HOY."""
+    now = datetime.now(TZ)
+    return now.date() if now.hour < 6 else now.date() + timedelta(days=1)
+
+
 def refresh(con):
     today = datetime.now(TZ).date()
     months = sorted({(today - timedelta(days=31)).strftime("%Y%m"), today.strftime("%Y%m"),
@@ -235,8 +241,36 @@ def update(con, hours_ahead=3.0):
             sync_day(con, d)
         except RuntimeError:
             pass
+    sync_details(con, log=log)
     inj = latest_injuries(con)
     an = None
+    changes = []
+    for p in pend:
+        g0 = dict(con.execute("SELECT * FROM games WHERE event_id=?", (p["event_id"],)).fetchone())
+        # ¿Algún equipo terminó un partido DESPUÉS de este análisis? (p. ej. jugó anoche hasta tarde)
+        late = con.execute("""SELECT 1 FROM games WHERE status='final' AND has_details=1 AND date_utc < ?
+                              AND (home_id IN (?,?) OR away_id IN (?,?)) AND datetime(replace(date_utc,'Z',''), '+150 minutes') >
+                              datetime(replace(substr(?,1,19),'T',' '))""",
+                           (g0["date_utc"], g0["home_id"], g0["away_id"], g0["home_id"], g0["away_id"], p["updated_at"] or p["kickoff_utc"])).fetchone()
+        if late and p["phase"] == "preliminar":
+            an = an or Analyzer(con)
+            _, pk, _ = an.analyze(g0)
+            same = next((c for c in pk if c["market"] == p["market"] and c["selection"] == p["selection"]
+                         and abs(c["line"] - p["line"]) < 1e-9 and (c["player_id"] or "") == p["player_id"]), None)
+            if same:
+                con.execute("UPDATE picks SET prob=?, prob_low=?, prob_high=?, min_odds=?, reasons=?, updated_at=? WHERE pick_id=?",
+                            (same["prob"], same["prob_low"], same["prob_high"], same["min_odds"],
+                             json.dumps(reasons(same["res"], same), ensure_ascii=False), _now(), p["pick_id"]))
+                if abs(same["prob"] - p["prob"]) >= 0.03:
+                    changes.append(f"🔄 {p['label']}: {p['prob']:.0%} → {same['prob']:.0%} (cuota mínima {same['min_odds']:.2f})")
+                log(f"  {p['label']}: re-analizado tras el último partido ({p['prob']:.0%} → {same['prob']:.0%})")
+            else:
+                con.execute("UPDATE picks SET status='withdrawn', result_detail=?, updated_at=? WHERE pick_id=?",
+                            ("Retirado tras analizar el último partido del equipo: ya no supera el filtro de calidad.", _now(), p["pick_id"]))
+                alert(con, p["event_id"], p["pick_id"], "ultimo_partido", "alta", f"{p['label']}: cambió tras el último partido.", "retirado")
+                changes.append(f"❌ Retirado: {p['label']} (novedades del último partido)")
+                continue
+    pend = [dict(r) for r in con.execute("SELECT * FROM picks WHERE status='pending'")]
     for p in pend:
         g = dict(con.execute("SELECT * FROM games WHERE event_id=?", (p["event_id"],)).fetchone())
         if g["status"] == "postponed":
@@ -248,6 +282,7 @@ def update(con, hours_ahead=3.0):
                 con.execute("UPDATE picks SET status='withdrawn', result_detail=?, updated_at=? WHERE pick_id=?",
                             (f"Retirado: {p['player']} figura como '{st}' en el parte de lesiones.", _now(), p["pick_id"]))
                 alert(con, p["event_id"], p["pick_id"], "lesion", "alta", f"{p['player']} aparece como {st}.", "retirado")
+                changes.append(f"❌ Retirado: {p['label']} ({p['player']} figura como {st})")
                 continue
         mv = odds_move(con, p["event_id"])
         if mv and mv > 0.08 and not con.execute("SELECT 1 FROM alerts WHERE pick_id=? AND kind='cuotas'", (p["pick_id"],)).fetchone():
@@ -285,7 +320,12 @@ def update(con, hours_ahead=3.0):
                            updated_at=? WHERE pick_id=?""",
                         ("Retirado tras confirmar titulares: ya no supera el filtro de calidad.", _now(), p["pick_id"]))
             alert(con, p["event_id"], p["pick_id"], "alineacion", "alta", f"{p['label']}: ya no supera el filtro.", "retirado")
+            changes.append(f"❌ Retirado: {p['label']} (titulares confirmados)")
     con.commit()
+    if changes and "--notify-changes" in sys.argv:
+        from pronosticos.app.notify import send
+        send("🏀 Actualización NBA\n" + "\n".join(changes) + "\n\nRevisa el tablero antes de apostar.")
+    return changes
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +430,6 @@ def main(argv):
     con = connect()
     if "--update" in argv:
         update(con)
-        sync_details(con, log=log)
         log(f"Liquidados: {settle_all(con)}")
         export.export_all(con, None)
         return
@@ -405,7 +444,7 @@ def main(argv):
         export.export_all(con, None)
         return
     args = [a for a in argv if not a.startswith("--")]
-    target = date.fromisoformat(args[0]) if args else datetime.now(TZ).date() + timedelta(days=1)
+    target = date.fromisoformat(args[0]) if args else target_date()
     result = nightly(con, target)
     export.export_all(con, result)
     log("Listo.")

@@ -32,6 +32,9 @@ def main():
     if mode == "open":
         webbrowser.open(URL)
         return
+    if mode == "open_nba":
+        webbrowser.open(URL + "/nba/")
+        return
     os.chdir(ROOT)
     sys.path.insert(0, ROOT)
     os.makedirs(LOGS, exist_ok=True)
@@ -41,11 +44,14 @@ def main():
     try:
         if mode == "nightly":
             run_module("pronosticos.app.run_daily")
-            run_module("nba.run_daily")
             if datetime.date.today().weekday() == 6:          # domingo: reajuste semanal
                 run_module("pronosticos.calidad.tuning")
                 run_module("pronosticos.calidad.backtest")
                 run_module("nba.backtest")
+        elif mode == "nba_nightly":                         # 23:40: NBA con los partidos de hoy ya jugados
+            run_module("nba.run_daily")
+        elif mode == "nba_late":                            # 01:30: partidos que terminaron tarde
+            run_module("nba.run_daily", "--update")
         elif mode == "update":
             run_module("pronosticos.app.run_daily", "--update")
             run_module("nba.run_daily", "--update")

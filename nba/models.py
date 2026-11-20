@@ -270,7 +270,16 @@ class PlayerBook:
                 "rest_dnps": rest_dnps, "dnp_last10": sum(r["dnp"] for r in last10),
                 "avg": {s: float(np.mean([r[s] or 0 for r in recent[-10:]])) for s in STATS},
                 "last5_pts": [int(r["pts"] or 0) for r in played[-5:]], "team_id": rows[-1]["team_id"],
-                "name": rows[-1]["name"], "pos": rows[-1]["pos"]}
+                "name": rows[-1]["name"], "pos": rows[-1]["pos"], "last": self._last_game(rows[-1], m_mean)}
+
+    def _last_game(self, r: dict, avg_min: float) -> dict:
+        """Novedades del último partido del jugador: minutos, expulsión, faltas, prórroga, no jugó."""
+        g = self.games.get(r["event_id"], {})
+        margin = abs((g.get("home_pts") or 0) - (g.get("away_pts") or 0))
+        return {"date_utc": r["date_utc"], "event_id": r["event_id"], "minutes": r["minutes"] or 0.0,
+                "avg_minutes": avg_min, "dnp": bool(r["dnp"]), "dnp_reason": r["dnp_reason"], "ejected": bool(r["ejected"]),
+                "pf": r["pf"] or 0, "overtime": (g.get("periods") or 4) > 4, "blowout": margin >= 20,
+                "pts": r["pts"], "opponent_game": f"{g.get('away', '')} @ {g.get('home', '')}"}
 
 
 def nb_sample(rng, mean, k, size):

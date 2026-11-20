@@ -11,9 +11,11 @@ on:
     - cron: "47 1 * * *"        # 20:47 COL → entrega (GitHub puede retrasarlo unos minutos)
     - cron: "23 13-23 * * *"    # 08:23–18:23 COL → alineaciones
     - cron: "23 0-3 * * *"      # 19:23–22:23 COL → alineaciones
+    - cron: "40 4 * * *"        # 23:40 COL → NBA (con los partidos de hoy terminados) + entrega a medianoche
+    - cron: "30 6 * * *"        # 01:30 COL → NBA: re-chequeo de partidos que terminaron tarde (+ correcciones)
   workflow_dispatch:
     inputs:
-      mode: {description: "nightly | deliver | update", default: "nightly"}
+      mode: {description: "nightly | deliver | update | nba | nba_late", default: "nightly"}
 permissions:
   contents: read
   pages: write
@@ -41,6 +43,8 @@ jobs:
             "15 0 * * *") M=nightly ;;
             "47 1 * * *") M=deliver ;;
             "23 13-23 * * *"|"23 0-3 * * *") M=update ;;
+            "40 4 * * *") M=nba ;;
+            "30 6 * * *") M=nba_late ;;
           esac
           echo "mode=${M:-nightly}" >> "$GITHUB_OUTPUT"
       - name: Restaurar base de datos
@@ -70,7 +74,6 @@ jobs:
       - name: Análisis nocturno
         if: steps.mode.outputs.mode == 'nightly'
         run: |
-          python -m nba.run_daily || echo "NBA: error (fútbol continúa)"
           python -m pronosticos.run_daily
           python -m pronosticos.run_daily --review
           if [ "$(TZ=America/Bogota date +%u)" = "7" ]; then
@@ -82,6 +85,22 @@ jobs:
         run: |
           python -m pronosticos.run_daily --update
           python -m nba.run_daily --update || true
+      - name: NBA a medianoche (análisis + entrega)
+        if: steps.mode.outputs.mode == 'nba'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          python -m nba.run_daily
+          python -m nba.run_daily --review
+          python -m nba.notify
+      - name: NBA re-chequeo 1:30 am (correcciones por Telegram)
+        if: steps.mode.outputs.mode == 'nba_late'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m nba.run_daily --update --notify-changes
       - name: Entrega por Telegram (21:00)
         if: steps.mode.outputs.mode == 'deliver'
         env:
@@ -91,7 +110,6 @@ jobs:
         run: |
           python -m pronosticos.run_daily --review
           python -m pronosticos.app.notify
-          python -m nba.notify || true
       - name: Compactar base de datos
         if: steps.mode.outputs.mode != 'deliver'
         run: python -c "import sqlite3; [ (lambda c: (c.execute('PRAGMA wal_checkpoint(TRUNCATE)'), c.execute('VACUUM'), c.close()))(sqlite3.connect(f)) for f in ('pronosticos/data/pronosticos.sqlite','nba/data/nba.sqlite') ]"

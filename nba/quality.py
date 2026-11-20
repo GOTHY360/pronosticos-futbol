@@ -140,6 +140,20 @@ def evaluate(res: dict, calibrator, market_ok: dict, odds: dict | None, flags: l
             if cvm > S["max_minutes_cv"]:
                 reasons_bad.append(f"minutos volátiles ({cvm:.0%})")
             ctx = res["ctx_home"] if pl["team_id"] == g["home_id"] else res["ctx_away"]
+            # Novedades del último partido (clave cuando juega noches consecutivas)
+            last = prof.get("last") or {}
+            recent_game = last and ctx["b2b"]
+            if last.get("minutes") and not last.get("blowout") and last["minutes"] < 0.5 * last.get("avg_minutes", 0) \
+                    and not last.get("ejected") and last.get("pf", 0) < 5:
+                reasons_bad.append(f"salió temprano en su último partido ({last['minutes']:.0f} min vs. {last['avg_minutes']:.0f} "
+                                   "de media): posible molestia no confirmada")
+            if last.get("ejected"):
+                warn += 1
+                checks.append(_check("Último partido", "aviso", "fue expulsado en su último partido (posible sanción)"))
+            if recent_game and (last.get("minutes", 0) >= 40 or last.get("overtime")) and \
+                    (sel["selection"] == "over" or m == "P_DD"):
+                reasons_bad.append(f"noche consecutiva tras jugar {last.get('minutes', 0):.0f} min"
+                                   + (" con prórroga" if last.get("overtime") else "") + ": fatiga")
             if sel["selection"] == "over" or m == "P_DD":
                 if ctx["b2b"] and prof["rest_dnps"] >= 1:
                     reasons_bad.append("gestión de carga: noche consecutiva y ya descansó en otras")
@@ -244,6 +258,14 @@ def reasons(res: dict, c: dict) -> list[str]:
         r.append("Ajustes: " + ", ".join(adj) + ".")
         r.append(f"Faltas: {pr['pf36']:.1f} por 36 min · expulsiones esta temporada: {pr['ejections']} · "
                  f"descansos por gestión de carga: {pr['rest_dnps']}.")
+        lg = pr.get("last") or {}
+        if lg:
+            d = lg["date_utc"][:10]
+            txt = ("no jugó" + (f" ({lg['dnp_reason']})" if lg.get("dnp_reason") else "")) if lg.get("dnp") else \
+                f"{lg['minutes']:.0f} min, {lg.get('pts') or 0} pts, {lg['pf']} faltas"
+            extra = [x for x, on in (("expulsado", lg.get("ejected")), ("hubo prórroga", lg.get("overtime")),
+                                     ("partido resuelto por 20+", lg.get("blowout"))) if on]
+            r.append(f"Último partido ({d}, {lg.get('opponent_game', '')}): {txt}" + (f" · {', '.join(extra)}" if extra else "") + ".")
     if c.get("market_prob") is not None:
         r.append(f"Mercado (sin margen): {c['market_prob']:.0%} vs. sistema {c['prob']:.0%}"
                  + (f"; cuota {c['odds_dec']:.2f}, VE {c['edge']:+.1%}." if c.get("odds_dec") else "."))

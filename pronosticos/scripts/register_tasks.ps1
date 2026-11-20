@@ -33,5 +33,13 @@ $t = New-ScheduledTaskTrigger -Daily -At 08:00
 $t.Repetition = (New-ScheduledTaskTrigger -Once -At 08:00 -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Hours 14)).Repetition
 Register-ScheduledTask -TaskPath $folder -TaskName "Alineaciones y ultima hora" -Action $a -Trigger $t -Settings $settings -Force | Out-Null
 
+# 5. NBA: análisis 23:40 (con los partidos de hoy ya terminados), presentación 00:00, re-chequeo 01:30
+$a = New-ScheduledTaskAction -Execute $pyw -Argument "`"$runner`" nba_nightly" -WorkingDirectory $root
+Register-ScheduledTask -TaskPath $folder -TaskName "NBA analisis 11-40pm" -Action $a -Trigger (New-ScheduledTaskTrigger -Daily -At 23:40) -Settings $settings -Force | Out-Null
+$a = New-ScheduledTaskAction -Execute $pyw -Argument "`"$runner`" open_nba" -WorkingDirectory $root
+Register-ScheduledTask -TaskPath $folder -TaskName "NBA presentar medianoche" -Action $a -Trigger (New-ScheduledTaskTrigger -Daily -At 00:00) -Settings $settings -Force | Out-Null
+$a = New-ScheduledTaskAction -Execute $pyw -Argument "`"$runner`" nba_late" -WorkingDirectory $root
+Register-ScheduledTask -TaskPath $folder -TaskName "NBA rechequeo 1-30am" -Action $a -Trigger (New-ScheduledTaskTrigger -Daily -At 01:30) -Settings $settings -Force | Out-Null
+
 Get-ScheduledTask -TaskPath $folder | Select-Object TaskName, State
 

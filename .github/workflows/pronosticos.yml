@@ -112,7 +112,16 @@ jobs:
           python -m pronosticos.app.notify
       - name: Compactar base de datos
         if: steps.mode.outputs.mode != 'deliver'
-        run: python -c "import sqlite3; [ (lambda c: (c.execute('PRAGMA wal_checkpoint(TRUNCATE)'), c.execute('VACUUM'), c.close()))(sqlite3.connect(f)) for f in ('pronosticos/data/pronosticos.sqlite','nba/data/nba.sqlite') ]"
+        run: |
+          python - <<'EOF'
+          import os, sqlite3
+          for f in ("pronosticos/data/pronosticos.sqlite", "nba/data/nba.sqlite"):
+              if os.path.exists(f):
+                  c = sqlite3.connect(f)
+                  c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                  c.execute("VACUUM")
+                  c.close()
+          EOF
       - name: Guardar base de datos
         if: always() && steps.mode.outputs.mode != 'deliver'
         uses: actions/cache/save@v4

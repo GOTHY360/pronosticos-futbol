@@ -1,17 +1,17 @@
 # AI Football Predictor en la nube (GitHub Actions, gratis). Funciona con el PC apagado.
-#  - 19:15 COL: análisis nocturno de mañana (margen por los retrasos habituales de GitHub)
-#  - ~20:47–21:00 COL: entrega por Telegram + tablero publicado en GitHub Pages
+#  - 18:00 COL: análisis nocturno de mañana; el trabajo espera en la nube y entrega a las 21:00 exactas
+#    (GitHub retrasa a veces los horarios hasta 1 h o más, por eso arranca con margen)
+#  - 22:45 COL: NBA; espera a las 23:40 para analizar y entrega a medianoche
 #  - Cada hora 08:00–22:00 COL: alineaciones y cambios de última hora
 # La base de datos (≈165 MB) se guarda en la caché de Actions, no en el repositorio.
 # Primera ejecución: si no hay caché, descarga el historial completo (~1,5 h) y valida los modelos.
 name: pronosticos
 on:
   schedule:
-    - cron: "15 0 * * *"        # 19:15 COL → análisis nocturno
-    - cron: "47 1 * * *"        # 20:47 COL → entrega (GitHub puede retrasarlo unos minutos)
+    - cron: "0 23 * * *"        # 18:00 COL → análisis nocturno + entrega a las 21:00
     - cron: "23 13-23 * * *"    # 08:23–18:23 COL → alineaciones
     - cron: "23 0-3 * * *"      # 19:23–22:23 COL → alineaciones
-    - cron: "40 4 * * *"        # 23:40 COL → NBA (con los partidos de hoy terminados) + entrega a medianoche
+    - cron: "45 3 * * *"        # 22:45 COL → NBA: espera a las 23:40, analiza y entrega a medianoche
     - cron: "30 6 * * *"        # 01:30 COL → NBA: re-chequeo de partidos que terminaron tarde (+ correcciones)
   workflow_dispatch:
     inputs:
@@ -40,10 +40,9 @@ jobs:
         run: |
           M="${{ github.event.inputs.mode }}"
           case "${{ github.event.schedule }}" in
-            "15 0 * * *") M=nightly ;;
-            "47 1 * * *") M=deliver ;;
+            "0 23 * * *") M=nightly ;;
             "23 13-23 * * *"|"23 0-3 * * *") M=update ;;
-            "40 4 * * *") M=nba ;;
+            "45 3 * * *") M=nba ;;
             "30 6 * * *") M=nba_late ;;
           esac
           echo "mode=${M:-nightly}" >> "$GITHUB_OUTPUT"
@@ -71,15 +70,23 @@ jobs:
         if: steps.mode.outputs.mode != 'deliver'
         run: |
           if [ ! -f nba/data/nba.sqlite ]; then python -m nba.backfill && python -m nba.backtest; fi
-      - name: Análisis nocturno
+      - name: Análisis nocturno + entrega a las 21:00
         if: steps.mode.outputs.mode == 'nightly'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
         run: |
           python -m pronosticos.run_daily
           python -m pronosticos.run_daily --review
           if [ "$(TZ=America/Bogota date +%u)" = "7" ]; then
             python -m pronosticos.tuning; python -m pronosticos.backtest; python -m pronosticos.run_daily --settle
-            python -m nba.backtest
+            python -m nba.backtest || true
           fi
+          python pronosticos/scripts/wait_until.py 20:50
+          python -m pronosticos.run_daily --update || true
+          python pronosticos/scripts/wait_until.py 21:00
+          python -m pronosticos.app.notify
       - name: Alineaciones y última hora
         if: steps.mode.outputs.mode == 'update'
         run: |
@@ -92,8 +99,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
         run: |
+          python pronosticos/scripts/wait_until.py 23:40
           python -m nba.run_daily
           python -m nba.run_daily --review
+          python pronosticos/scripts/wait_until.py 00:00
           python -m nba.notify
       - name: NBA re-chequeo 1:30 am (correcciones por Telegram)
         if: steps.mode.outputs.mode == 'nba_late'
@@ -101,7 +110,7 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m nba.run_daily --update --notify-changes
-      - name: Entrega por Telegram (21:00)
+      - name: Entrega manual por Telegram
         if: steps.mode.outputs.mode == 'deliver'
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
